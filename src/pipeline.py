@@ -80,8 +80,13 @@ def ask_question(vector_store, llm, question: str) -> dict:
             "answer"  -> str: the generated answer
             "sources" -> list[str]: the chunk texts that were retrieved
     """
-    # TODO: implement this (~6-8 lines)
-    raise NotImplementedError("TODO 1: Implement ask_question")
+    docs = vector_store.similarity_search(question, k=3)
+    sources = [doc.page_content for doc in docs]
+    context = "\n\n".join(sources)
+    prompt = PROMPT_TEMPLATE.format(context=context, question=question)
+    result = llm(prompt)
+    answer = result[0]["generated_text"]
+    return {"answer": answer, "sources": sources}
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -102,8 +107,22 @@ def main():
     """
     data_dir = os.path.join(os.path.dirname(__file__), "..", "data")
 
-    # TODO: implement this (~10-12 lines)
-    raise NotImplementedError("TODO 2: Complete the interactive loop")
+    vector_store = build_knowledge_base(data_dir)
+    llm = get_llm()
+
+    while True:
+        question = input("> ")
+
+        if question.lower() == "quit":
+            break
+
+        result = ask_question(vector_store, llm, question)
+
+        print("\n📄 Sources:")
+        for i, source in enumerate(result["sources"], start=1):
+            print(f"  {i}. {source}")
+
+        print(f"\n💬 Answer: {result['answer']}\n")
 
 
 if __name__ == "__main__":
