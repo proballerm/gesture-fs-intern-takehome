@@ -12,7 +12,10 @@ Useful docs:
   - HuggingFace pipelines: https://python.langchain.com/docs/integrations/llms/huggingface_pipelines/
 """
 
+import argparse
 import os
+from typing import Any, Callable
+
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 from src.knowledge_base import build_knowledge_base
 
@@ -33,9 +36,20 @@ def get_llm():
     model = AutoModelForSeq2SeqLM.from_pretrained("google/flan-t5-base")
 
     def generate(prompt):
-        inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
-        outputs = model.generate(**inputs, max_new_tokens=150)
-        text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+        inputs = tokenizer(
+            prompt,
+            return_tensors="pt",
+            truncation=True,
+            max_length=512,
+        )
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=150,
+        )
+        text = tokenizer.decode(
+            outputs[0],
+            skip_special_tokens=True,
+        )
         return [{"generated_text": text}]
 
     return generate
@@ -58,7 +72,11 @@ Answer:"""
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # TODO 1: Implement ask_question
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-def ask_question(vector_store, llm, question: str) -> dict:
+def ask_question(
+    vector_store: Any,
+    llm: Callable[[str], list[dict[str, str]]],
+    question: str,
+) -> dict[str, Any]:
     """Retrieve relevant chunks and generate an answer.
 
     Steps:
@@ -80,13 +98,41 @@ def ask_question(vector_store, llm, question: str) -> dict:
             "answer"  -> str: the generated answer
             "sources" -> list[str]: the chunk texts that were retrieved
     """
+    question = question.strip()
+
+    if not question:
+        return {
+            "answer": "Please enter a question.",
+            "sources": [],
+        }
+
     docs = vector_store.similarity_search(question, k=3)
     sources = [doc.page_content for doc in docs]
     context = "\n\n".join(sources)
-    prompt = PROMPT_TEMPLATE.format(context=context, question=question)
+
+    prompt = PROMPT_TEMPLATE.format(
+        context=context,
+        question=question,
+    )
+
     result = llm(prompt)
-    answer = result[0]["generated_text"]
-    return {"answer": answer, "sources": sources}
+    answer = result[0]["generated_text"].strip()
+
+    return {
+        "answer": answer,
+        "sources": sources,
+    }
+
+
+def print_result(result: dict[str, Any]) -> None:
+    """Print retrieved sources and generated answer."""
+    if result["sources"]:
+        print("\n📄 Sources:")
+
+        for i, source in enumerate(result["sources"], start=1):
+            print(f"  {i}. {source}")
+
+    print(f"\n💬 Answer: {result['answer']}\n")
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -105,24 +151,71 @@ def main():
          - Calls ask_question() with their input
          - Prints the retrieved sources and the answer
     """
-    data_dir = os.path.join(os.path.dirname(__file__), "..", "data")
+    parser = argparse.ArgumentParser(
+        description="Marketing agency document Q&A chatbot"
+    )
 
-    vector_store = build_knowledge_base(data_dir)
-    llm = get_llm()
+    parser.add_argument(
+        "--query",
+        type=str,
+        help="Ask a single question and exit",
+    )
+
+    args = parser.parse_args()
+
+    data_dir = os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        "data",
+    )
+
+    if not os.path.isdir(data_dir):
+        print(f"Error: data directory not found: {data_dir}")
+        return
+
+    try:
+        vector_store = build_knowledge_base(data_dir)
+        llm = get_llm()
+    except FileNotFoundError as exc:
+        print(f"Error: required file not found: {exc}")
+        return
+    except Exception as exc:
+        print(f"Error initializing the Q&A system: {exc}")
+        return
+
+    if args.query is not None:
+        question = args.query.strip()
+
+        if not question:
+            print("Please enter a non-empty question.")
+            return
+
+        result = ask_question(
+            vector_store,
+            llm,
+            question,
+        )
+
+        print_result(result)
+        return
 
     while True:
-        question = input("> ")
+        question = input("> ").strip()
 
         if question.lower() == "quit":
             break
 
-        result = ask_question(vector_store, llm, question)
+        if not question:
+            print("Please enter a question.")
+            continue
 
-        print("\n📄 Sources:")
-        for i, source in enumerate(result["sources"], start=1):
-            print(f"  {i}. {source}")
+        result = ask_question(
+            vector_store,
+            llm,
+            question,
+        )
 
-        print(f"\n💬 Answer: {result['answer']}\n")
+        print_result(result)
 
 
 if __name__ == "__main__":
